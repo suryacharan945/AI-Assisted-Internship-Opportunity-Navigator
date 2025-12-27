@@ -77,13 +77,53 @@ with tab1:
     )
 
     # --------------------------------------------------------
-    # STUDENT PROFILE (LEFT PANEL STYLE)
+    # HELPER: SKILL EXTRACTION FROM RESUME
+    # --------------------------------------------------------
+    try:
+        import PyPDF2
+    except ImportError:
+        PyPDF2 = None
+
+    SKILL_VOCAB = [
+        "python", "machine learning", "data science", "sql", "deep learning",
+        "nlp", "cloud", "aws", "power bi", "tableau",
+        "excel", "statistics", "react", "nodejs", "javascript"
+    ]
+
+    def extract_skills_from_pdf(pdf_file):
+        if PyPDF2 is None:
+            return ""
+        reader = PyPDF2.PdfReader(pdf_file)
+        text = ""
+        for page in reader.pages:
+            if page.extract_text():
+                text += page.extract_text()
+        text = clean_text(text)
+        found = [skill for skill in SKILL_VOCAB if skill in text]
+        return ", ".join(sorted(set(found)))
+
+    # --------------------------------------------------------
+    # STUDENT PROFILE
     # --------------------------------------------------------
     st.subheader("👤 Student Profile")
 
+    if "skills_input" not in st.session_state:
+        st.session_state.skills_input = "python, machine learning, data science"
+
+    resume_file = st.file_uploader(
+        "Upload Resume (PDF) – optional",
+        type=["pdf"]
+    )
+
+    if resume_file:
+        extracted_skills = extract_skills_from_pdf(resume_file)
+        if extracted_skills:
+            st.session_state.skills_input = extracted_skills
+            st.success("✅ Skills automatically extracted from resume")
+
     skills_input = st.text_input(
         "Enter your skills (comma-separated)",
-        "python, machine learning, data science"
+        value=st.session_state.skills_input
     )
 
     interests_input = st.text_input(
@@ -121,17 +161,14 @@ with tab1:
     # --------------------------------------------------------
     if st.button("🔍 Get Recommendations"):
 
-        # -------- Profile Processing --------
         student_text = clean_text(skills_input + " " + interests_input)
         student_vector = vectorizer.transform([student_text])
         student_skills = set(clean_text(skills_input).split(", "))
 
-        # -------- Deadline Handling --------
         df["deadline"] = pd.to_datetime(df["deadline"])
         df["days_left"] = (df["deadline"] - pd.Timestamp.today()).dt.days
         df["days_left"] = df["days_left"].apply(lambda x: max(x, 0))
 
-        # -------- Similarity & Scoring --------
         opp_vectors = vectorizer.transform(df["combined_text"])
         df["skill_similarity"] = cosine_similarity(
             student_vector, opp_vectors
@@ -159,19 +196,18 @@ with tab1:
 
         for _, row in results.iterrows():
 
-            required_skills = set(row["required_skills"].split(", "))
-            matched_skills = required_skills.intersection(student_skills)
+            required = set(row["required_skills"].split(", "))
+            matched = required.intersection(student_skills)
 
             with st.expander(
                 f"📌 {row['opportunity_title']} ({row['platform']})",
                 expanded=True
             ):
 
-                # -------- WHY THIS WAS RECOMMENDED --------
                 st.markdown("### 🔍 Why this was recommended?")
                 st.markdown(
                     f"""
-                    **Matched Skills:** `{', '.join(matched_skills) if matched_skills else 'Limited overlap'}`  
+                    **Matched Skills:** `{', '.join(matched) if matched else 'Limited overlap'}`  
                     **Skill Similarity Score:** `{row['skill_similarity']:.3f}`  
                     **Urgency Score:** `{row['urgency_score']:.3f}`  
                     **Days Left:** `{row['days_left']}`  
@@ -179,7 +215,6 @@ with tab1:
                     """
                 )
 
-                # -------- OPPORTUNITY DETAILS --------
                 st.markdown("### 📄 Opportunity Details")
                 st.markdown(
                     f"""
@@ -190,24 +225,15 @@ with tab1:
                     """
                 )
 
-            # -------- REPORT (HUMAN READABLE) --------
             report_paragraphs.append(
                 f"""
 Opportunity: {row['opportunity_title']} ({row['platform']})
 
-This opportunity was recommended because your profile aligns with the required
-skills ({', '.join(matched_skills) if matched_skills else 'partial overlap'})
-and matches your interest domain ({row['domain']}).
-
-The system calculated a skill relevance score of {row['skill_similarity']:.2f}
-and an urgency score of {row['urgency_score']:.2f}, considering that only
-{row['days_left']} days remain before the deadline.
+This opportunity was recommended because your skills ({skills_input})
+align with the required skills ({row['required_skills']}), and the deadline
+is approaching in {row['days_left']} days.
 
 Final Recommendation Score: {row['final_score']:.2f}
-
-Required Skills: {row['required_skills']}
-Opportunity Type: {row['opportunity_type']}
-Deadline: {row['deadline'].date()}
 """
             )
 
@@ -225,6 +251,7 @@ Deadline: {row['deadline'].date()}
             "opportunity_recommendations.pdf",
             "application/pdf"
         )
+
 with tab2:
 
     st.title("🧠 Skill Gap Analysis & Learning Recommendations")
